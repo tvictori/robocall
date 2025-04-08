@@ -46,14 +46,13 @@ class CommandExecutor(private val context: Context) {
 
         val phoneNumber = findContactPhoneNumber(contactName) ?: return false
 
-        try {
-            val smsManager = SmsManager.getDefault()
-            smsManager.sendTextMessage(phoneNumber, null, message, null, null)
-            return true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return false
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("smsto:$phoneNumber")
+            putExtra("sms_body", message)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
+        context.startActivity(intent)
+        return true
     }
 
     private fun findContactPhoneNumber(contactName: String): String? {
