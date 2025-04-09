@@ -17,20 +17,40 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val speechRecognizer: SpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(application)
+    private var speechRecognizer: SpeechRecognizer? = null
     private val commandExecutor = CommandExecutor(application)
     
     private val _voiceState = MutableStateFlow<VoiceState>(VoiceState.Idle)
     val voiceState: StateFlow<VoiceState> = _voiceState.asStateFlow()
 
     init {
-        setupSpeechRecognizer()
+        if (SpeechRecognizer.isRecognitionAvailable(application)) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(application)
+            setupSpeechRecognizer()
+        } else {
+            _voiceState.value = VoiceState.Error("Speech recognition is not available on this device")
+        }
     }
 
     private fun setupSpeechRecognizer() {
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 _voiceState.value = VoiceState.Listening
+            }
+
+            override fun onBeginningOfSpeech() {
+                _voiceState.value = VoiceState.Listening
+            }
+
+            override fun onRmsChanged(rmsdB: Float) {
+                // Update UI to show that we're receiving audio
+                if (_voiceState.value is VoiceState.Listening) {
+                    _voiceState.value = VoiceState.Listening
+                }
+            }
+
+            override fun onEndOfSpeech() {
+                _voiceState.value = VoiceState.Processing("Processing your speech...")
             }
 
             override fun onResults(results: Bundle?) {
@@ -55,33 +75,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Insufficient permissions"
                     SpeechRecognizer.ERROR_NETWORK -> "Network error"
                     SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-                    SpeechRecognizer.ERROR_NO_MATCH -> "No match found"
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognition service busy"
+                    SpeechRecognizer.ERROR_NO_MATCH -> "Please try speaking again"
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition is busy"
                     SpeechRecognizer.ERROR_SERVER -> "Server error"
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Please speak after tapping the mic"
                     else -> "Unknown error"
                 }
                 _voiceState.value = VoiceState.Error(errorMessage)
             }
 
-            // Required but unused RecognitionListener methods
-            override fun onBeginningOfSpeech() {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
             override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onRmsChanged(rmsdB: Float) {}
         })
     }
 
     fun startListening() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        if (speechRecognizer == null) {
+            _voiceState.value = VoiceState.Error("Speech recognition is not available")
+            return
         }
-        
-        speechRecognizer.startListening(intent)
+
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en")
+                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                // Add timing parameters
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+            }
+            
+            _voiceState.value = VoiceState.Preparing
+            speechRecognizer?.cancel() // Cancel any ongoing recognition
+            speechRecognizer?.startListening(intent)
+        } catch (e: Exception) {
+            _voiceState.value = VoiceState.Error("Failed to start speech recognition: ${e.message}")
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
     }
 
     private fun processCommand(spokenText: String) {
@@ -93,10 +133,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             VoiceState.Error("Failed to execute command")
         }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        speechRecognizer.destroy()
     }
 } 

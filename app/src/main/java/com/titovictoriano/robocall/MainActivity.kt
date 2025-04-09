@@ -2,6 +2,7 @@ package com.titovictoriano.robocall
 
 import android.Manifest
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,7 +29,12 @@ class MainActivity : ComponentActivity() {
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.CALL_PHONE,
         Manifest.permission.SEND_SMS,
-        Manifest.permission.READ_CONTACTS
+        Manifest.permission.READ_CONTACTS,
+        // Bluetooth permissions
+        Manifest.permission.BLUETOOTH,
+        Manifest.permission.BLUETOOTH_ADMIN,
+        Manifest.permission.BLUETOOTH_CONNECT,
+        Manifest.permission.BLUETOOTH_SCAN
     )
 
     private val permissionLauncher = registerForActivityResult(
@@ -37,6 +43,12 @@ class MainActivity : ComponentActivity() {
         val allGranted = permissions.entries.all { it.value }
         if (allGranted) {
             viewModel.startListening()
+        } else {
+            Toast.makeText(
+                this,
+                "All permissions are required for the app to work properly",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -51,10 +63,22 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     MainScreen(
-                        onStartListening = { permissionLauncher.launch(permissions) }
+                        onStartListening = { checkAndRequestPermissions() }
                     )
                 }
             }
+        }
+    }
+
+    private fun checkAndRequestPermissions() {
+        val missingPermissions = permissions.filter {
+            checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }.toTypedArray()
+
+        if (missingPermissions.isNotEmpty()) {
+            permissionLauncher.launch(missingPermissions)
+        } else {
+            viewModel.startListening()
         }
     }
 }
@@ -119,28 +143,36 @@ fun StatusCard(state: VoiceState) {
                 containerColor = when (state) {
                     is VoiceState.Error -> MaterialTheme.colorScheme.errorContainer
                     is VoiceState.Success -> MaterialTheme.colorScheme.primaryContainer
+                    is VoiceState.Preparing -> MaterialTheme.colorScheme.tertiaryContainer
                     else -> MaterialTheme.colorScheme.secondaryContainer
                 }
             )
         ) {
-            Text(
-                text = when (state) {
-                    is VoiceState.Listening -> "Listening..."
-                    is VoiceState.Processing -> "Processing: ${state.command}"
-                    is VoiceState.Error -> "Error: ${state.message}"
-                    is VoiceState.Success -> state.message
-                    else -> ""
-                },
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                textAlign = TextAlign.Center,
-                color = when (state) {
-                    is VoiceState.Error -> MaterialTheme.colorScheme.onErrorContainer
-                    is VoiceState.Success -> MaterialTheme.colorScheme.onPrimaryContainer
-                    else -> MaterialTheme.colorScheme.onSecondaryContainer
-                }
-            )
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = when (state) {
+                        is VoiceState.Preparing -> "Getting ready..."
+                        is VoiceState.Listening -> "Listening..."
+                        is VoiceState.Processing -> "Processing: ${state.command}"
+                        is VoiceState.Error -> "Error: ${state.message}"
+                        is VoiceState.Success -> state.message
+                        else -> ""
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    color = when (state) {
+                        is VoiceState.Error -> MaterialTheme.colorScheme.onErrorContainer
+                        is VoiceState.Success -> MaterialTheme.colorScheme.onPrimaryContainer
+                        is VoiceState.Preparing -> MaterialTheme.colorScheme.onTertiaryContainer
+                        else -> MaterialTheme.colorScheme.onSecondaryContainer
+                    }
+                )
+            }
         }
     }
 }
